@@ -1,0 +1,38 @@
+databases:
+  - name: smartparking-db
+    databaseName: smartparking
+    user: smartparking
+    plan: free
+    region: singapore
+
+services:
+  - type: web
+    name: smartparking-cloud
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r cloud/requirements.txt
+    startCommand: alembic -c cloud/alembic.ini upgrade head && uvicorn cloud.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.14.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smartparking-db
+          property: connectionString
+      - key: SMARTPARKING_DEVICE_TOKEN
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: NICEGUI_STORAGE_SECRET
+        generateValue: true
+      - key: APP_ENV
+        value: production
+      - key: SESSION_HOURS
+        value: "12"
+      - key: RECENT_DEVICE_MINUTES
+        value: "10"
