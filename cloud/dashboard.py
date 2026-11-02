@@ -405,33 +405,35 @@ def register_dashboard(
     @ui.page("/live")
     async def live_camera_page(request: Request):
         _shell("Camera trực tiếp", request)
-        ui.label("Camera từ Raspberry Pi (1 FPS mặc định). Một webcam dùng chung "
-                 "với RFID và YOLO/OCR; đây là preview, không lưu video.")
+        ui.label(
+            "Camera Raspberry Pi: MJPEG qua Cloud, không lưu video. "
+            "YOLO/OCR chỉ xử lý khi RFID kích hoạt."
+        ).classes("text-slate-600")
         status_label = ui.label("Đang kiểm tra camera...").classes("text-blue-700")
-        preview = ui.image('/api/live/frame.jpg').classes(
-            "w-full max-w-4xl rounded-xl bg-slate-950"
-        )
+        ui.html(
+            '<img src="/api/live/stream.mjpg" alt="SmartParking live camera" '
+            'style="display:block;width:100%;height:auto;max-width:896px;'
+            'background:#0f172a;border-radius:12px" />'
+        ).classes("w-full max-w-4xl")
 
         async def update_status():
             if not await _session_is_valid(request, factory):
-                ui.navigate.to('/login')
+                ui.navigate.to("/login")
                 return
             info = fastapi_app.state.live_frames.status()
-            if info['available']:
+            if info["available"]:
                 status_label.set_text(
-                    f"Đang nhận ảnh từ {info['device_id']} | "
-                    f"độ trễ khung gần nhất: {info['age_seconds']} giây"
+                    f"Camera {info['device_id']} | "
+                    f"Cloud nhận {info['incoming_fps']:.1f} FPS | "
+                    f"tuổi frame {info['age_seconds']} giây"
                 )
             else:
                 status_label.set_text(
-                    "Chưa có video / mất kết nối. Kiểm tra --live trên Pi và Device Token."
+                    "Không có frame mới. Kiểm tra Raspberry Pi và Cloud."
                 )
 
         await update_status()
-        ui.timer(5.0, update_status)
-        ui.timer(1.0, lambda: preview.set_source(
-            f'/api/live/frame.jpg?t={time.time_ns()}'
-        ))
+        ui.timer(2.0, update_status)
 
     @ui.page("/plates")
     async def plates_page(request: Request):
