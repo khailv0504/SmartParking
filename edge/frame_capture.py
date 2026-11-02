@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import nullcontext
 
 import cv2
 import numpy as np
@@ -15,7 +16,8 @@ class FrameSelector:
     def __init__(self, output_dir: str | Path, sample_fps: float = 3,
                  capture_seconds: float = 1.5, top_k: int = 3,
                  quality_threshold: float = 0.48, camera_index: int = 0,
-                 mock_image: str | None = None):
+                 mock_image: str | None = None,
+                 shared_camera: CameraSource | None = None):
         self.output_dir = Path(output_dir)
         self.sample_fps = sample_fps
         self.capture_seconds = capture_seconds
@@ -23,12 +25,13 @@ class FrameSelector:
         self.quality_threshold = quality_threshold
         self.camera_index = camera_index
         self.mock_image = mock_image
+        self.shared_camera = shared_camera
 
     def collect(self, event_id: str) -> list[tuple[np.ndarray, float]]:
         """Return at most K accepted original frames; rank by full-frame IQA.
 
         Motion gate disabled: RFID is the event trigger; stationary motorcycles
-        must still be processed. Only start camera capture after authorized RFID.
+        must still be processed. RFID authorization gates AI inference; live preview can keep camera open.
         """
         output = self.output_dir / event_id
         pipeline = FrameSelectionPipeline(
@@ -38,9 +41,11 @@ class FrameSelector:
                            top_k=self.top_k,
                            preview=False),
             output_dir=output)
-        source = ImageSource(self.mock_image) if self.mock_image else CameraSource(
-            index=self.camera_index, width=1280, height=720, fps=30, fourcc='MJPG')
-        with source:
+        source = self.shared_camera or (ImageSource(self.mock_image) if self.mock_image else CameraSource(
+            index=self.camera_index, width=1280, height=720, fps=30, fourcc='MJPG'))
+        # The main process owns the shared camera for its whole lifetime.
+        # Do not close/reopen it for each RFID tap.
+        with (nullcontext(source) if self.shared_camera is not None else source):
             report = pipeline.run(source, image_mode=bool(self.mock_image))
         frames: list[tuple[np.ndarray,float]] = []
         for item in report['best_frames']:

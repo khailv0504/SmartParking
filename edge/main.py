@@ -21,6 +21,8 @@ import time
 from .controller import ParkingController
 from .database import Database
 from .frame_capture import FrameSelector, MockFrameSelector
+from .alpr_preprocess.sources import CameraSource
+from .live_uplink import LiveFrameUplink
 from .recognition import MockRecognizer, YOLOPlateRecognizer
 from .rfid import RC522Reader
 from .sync import SyncWorker
@@ -71,6 +73,9 @@ def main() -> int:
     p_run = sub.add_parser('run')
     p_run.add_argument('--real', action='store_true', help='Required to open RC522 and camera')
     p_run.add_argument('--camera',type=int,default=0)
+    p_run.add_argument('--live',action='store_true',help='Push single-camera JPEG preview to Cloud')
+    p_run.add_argument('--live-fps',type=float,default=1.0)
+    p_run.add_argument('--live-width',type=int,default=640)
     p_run.add_argument('--detector',default='')
     p_run.add_argument('--recognizer',default='')
     p_run.add_argument('--strict-roi-quality',action='store_true')
@@ -131,27 +136,55 @@ def main() -> int:
     if args.command=='run':
         if not args.real:
             parser.error('run requires --real: hardware access is never implicit')
-        model=make_real_recognizer(args)
-        selector=FrameSelector(ROOT/'data'/'captures',camera_index=args.camera)
-        controller=ParkingController(db,selector,model)
-        reader=RC522Reader()
+        if args.live and (not 0.2 <= args.live_fps <= 2.0 or not 160 <= args.live_width <= 960):
+            parser.error('Live settings: 0.2 <= --live-fps <= 2, 160 <= --live-width <= 960')
         stop=threading.Event()
         def stop_signal(_sig,_frame):
             stop.set()
         signal.signal(signal.SIGINT,stop_signal)
         signal.signal(signal.SIGTERM,stop_signal)
         sync=worker_from_env(db)
-        if sync:
-            thread=threading.Thread(target=sync.run_forever,args=(stop,),daemon=True,name='cloud-sync')
-            thread.start()
-        LOG.info('Waiting for RC522 taps. Ctrl+C to stop.')
-        while not stop.is_set():
-            uid=reader.read_uid()
-            if uid:
-                result=controller.process(uid)
-                LOG.info('event: %s',json.dumps(vars(result)))
-            else:
-                stop.wait(.1)
+        if args.live and sync is None:
+            parser.error('--live requires SMARTPARKING_CLOUD_URL and SMARTPARKING_DEVICE_TOKEN')
+        threads=[]
+        # One camera is opened ONCE, and shared between RFID IQA and preview.
+        with CameraSource(index=args.camera, width=1280, height=720,
+                          fps=30, fourcc='MJPG') as camera:
+            model=make_real_recognizer(args)
+            selector=FrameSelector(ROOT/'data'/'captures',camera_index=args.camera,
+                                   shared_camera=camera)
+            controller=ParkingController(db,selector,model)
+            reader=RC522Reader()
+            uploader=None
+            if sync:
+                thread=threading.Thread(target=sync.run_forever,args=(stop,),
+                                        daemon=True,name='cloud-sync')
+                thread.start()
+                threads.append(thread)
+            if args.live:
+                uploader=LiveFrameUplink(camera, sync.url, sync.token, db.device_id,
+                                         fps=args.live_fps,max_width=args.live_width)
+                thread=threading.Thread(target=uploader.run_forever,args=(stop,),
+                                        daemon=True,name='camera-live-uplink')
+                thread.start()
+                threads.append(thread)
+                LOG.info('Live camera uplink enabled: %.1f FPS, width=%d',
+                         args.live_fps,args.live_width)
+            LOG.info('Waiting for RC522 taps. Ctrl+C to stop.')
+            try:
+                while not stop.is_set():
+                    uid=reader.read_uid()
+                    if uid:
+                        result=controller.process(uid)
+                        if uploader:
+                            uploader.note_event(result)
+                        LOG.info('event: %s',json.dumps(vars(result)))
+                    else:
+                        stop.wait(.1)
+            finally:
+                stop.set()
+                for thread in threads:
+                    thread.join(timeout=6)
         return 0
     return 1
 
