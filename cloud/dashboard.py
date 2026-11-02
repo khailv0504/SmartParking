@@ -315,19 +315,22 @@ def register_dashboard(
     async def rfid_page(request: Request):
         _shell("Quản lý thẻ RFID", request)
         ui.label(
-            "Chỉ đọc: trạng thái enabled/disabled vẫn do SQLite trên Raspberry Pi "
-            "quản lý và chưa được đồng bộ."
-        ).classes("bg-amber-50 text-amber-900 rounded-lg p-4 w-full")
+            "Danh sách thẻ được đồng bộ một chiều từ Raspberry Pi. "
+            "Quyền bật/tắt thẻ chỉ được thay đổi trên thiết bị Edge."
+        ).classes("bg-blue-50 text-blue-900 rounded-lg p-4 w-full")
         loading = _loading_label()
         error = _error_label()
         columns = [
-            {"name": "uid", "label": "UID đã quan sát", "field": "uid"},
-            {"name": "last_seen", "label": "Lần xuất hiện cuối", "field": "last_seen"},
+            {"name": "device_id", "label": "Raspberry Pi", "field": "device_id"},
+            {"name": "uid", "label": "UID RFID", "field": "uid"},
+            {"name": "status", "label": "Trạng thái", "field": "status"},
+            {"name": "created_at", "label": "Ngày đăng ký", "field": "created_at"},
+            {"name": "synced_at", "label": "Lần đồng bộ", "field": "synced_at"},
+            {"name": "last_seen", "label": "Lần sử dụng", "field": "last_seen"},
             {"name": "count", "label": "Số sự kiện", "field": "count"},
-            {"name": "last_type", "label": "Loại gần nhất", "field": "last_type"},
         ]
-        table = _table(columns)
-        empty = _empty_label("Chưa quan sát thấy UID nào.")
+        table = ui.table(columns=columns, rows=[], row_key="row_id").classes("w-full bg-white rounded-xl").props("flat bordered wrap-cells")
+        empty = _empty_label("Chưa nhận được danh sách thẻ từ Raspberry Pi.")
 
         async def refresh():
             loading.set_visibility(True)

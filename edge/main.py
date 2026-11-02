@@ -81,6 +81,10 @@ def main() -> int:
     if args.command=='register-card':
         db.register_card(args.uid,not args.disable)
         print('Card updated:',args.uid.upper(),'enabled:',not args.disable)
+        worker = worker_from_env(db)
+        if worker:
+            ok, failed = worker.run_cards_once()
+            print('card snapshot synced,failed:', (ok, failed))
         return 0
     if args.command=='status':
         print(json.dumps(db.summary(),indent=2))
@@ -89,7 +93,9 @@ def main() -> int:
         worker=worker_from_env(db)
         if worker is None:
             raise RuntimeError('Cloud URL/token not configured')
-        print('synced,failed:',worker.run_once())
+        print('events synced,failed:',worker.run_once())
+        print('card snapshots synced,failed:',worker.run_cards_once())
+        print('card sync state:',json.dumps(db.card_sync_status(),ensure_ascii=False))
         return 0
     if args.command=='demo':
         db.register_card(args.uid)
