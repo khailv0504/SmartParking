@@ -10,9 +10,10 @@ from .card_sync import build_card_router
 from .auth import build_auth_router, resolve_admin_session
 from .config import Settings, get_settings
 from .dashboard import register_dashboard
+from .live import LiveFrameStore, build_live_router
 from .database import make_engine, make_session_factory
 
-PROTECTED_PAGES = {"/", "/history", "/inside", "/rfid", "/device", "/plates"}
+PROTECTED_PAGES = {"/", "/history", "/inside", "/rfid", "/device", "/plates", "/live"}
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = factory
+    app.state.live_frames = LiveFrameStore()
 
     @app.middleware("http")
     async def protect_admin_pages(request: Request, call_next):
@@ -69,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(build_api_router(settings, factory))
     app.include_router(build_card_router(settings, factory))
     app.include_router(build_auth_router(settings, factory))
+    app.include_router(build_live_router(settings, factory, app.state.live_frames))
     register_dashboard(app, settings, factory)
     return app
 

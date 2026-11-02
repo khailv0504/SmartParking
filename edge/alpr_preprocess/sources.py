@@ -160,6 +160,15 @@ class CameraSource:
             with self._lock:
                 self._latest = (self._capture_counter, timestamp_s, frame)
 
+    def latest_frame(self) -> FramePacket | None:
+        """Copy the latest frame without opening a second capture device."""
+        with self._lock:
+            latest = self._latest
+            if latest is None:
+                return None
+            sequence, timestamp_s, frame = latest
+            return FramePacket(frame.copy(), sequence, timestamp_s)
+
     def __iter__(self) -> Iterator[FramePacket]:
         last_seen = 0
         while not self._stop.is_set():
