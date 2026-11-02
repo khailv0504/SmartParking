@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from .api import build_api_router
+from .card_sync import build_card_router
 from .auth import build_auth_router, resolve_admin_session
 from .config import Settings, get_settings
 from .dashboard import register_dashboard
@@ -66,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     app.include_router(build_api_router(settings, factory))
+    app.include_router(build_card_router(settings, factory))
     app.include_router(build_auth_router(settings, factory))
     register_dashboard(app, settings, factory)
     return app

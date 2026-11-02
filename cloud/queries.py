@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import EdgeEvent, ParkingSession
+from .models import EdgeEvent, ParkingSession, RFIDCard
 
 VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -146,49 +146,32 @@ def inside_sessions(factory: sessionmaker[Session]) -> list[dict]:
 
 
 def rfid_cards(factory: sessionmaker[Session]) -> list[dict]:
-    # Đây chỉ là UID đã quan sát, tuyệt đối không suy luận enabled/disabled.
-    latest_time = func.max(EdgeEvent.event_timestamp).label("last_seen")
+    """Actual registered cards (not merely UIDs seen in events)."""
     with factory() as db:
-        base = (
+        cards = db.scalars(select(RFIDCard).order_by(RFIDCard.device_id, RFIDCard.uid)).all()
+        stats = db.execute(
             select(
-                EdgeEvent.uid.label("uid"),
-                latest_time,
+                EdgeEvent.device_id, EdgeEvent.uid,
                 func.count().label("event_count"),
-            )
-            .where(EdgeEvent.uid.is_not(None))
-            .group_by(EdgeEvent.uid)
-            .subquery()
-        )
-        latest = (
-            select(
-                EdgeEvent.uid.label("uid"),
-                EdgeEvent.event_type.label("last_type"),
-                func.row_number()
-                .over(
-                    partition_by=EdgeEvent.uid,
-                    order_by=(
-                        EdgeEvent.event_timestamp.desc(),
-                        EdgeEvent.received_at.desc(),
-                    ),
-                )
-                .label("rank"),
-            )
-            .where(EdgeEvent.uid.is_not(None))
-            .subquery()
-        )
-        rows = db.execute(
-            select(base.c.uid, base.c.last_seen, base.c.event_count, latest.c.last_type)
-            .join(latest, and_(latest.c.uid == base.c.uid, latest.c.rank == 1))
-            .order_by(base.c.last_seen.desc())
+                func.max(EdgeEvent.event_timestamp).label("last_seen"),
+            ).where(EdgeEvent.uid.is_not(None))
+            .group_by(EdgeEvent.device_id, EdgeEvent.uid)
         ).all()
+    by_id = {(row.device_id, row.uid): row for row in stats}
     return [
         {
+            "device_id": row.device_id,
             "uid": row.uid,
-            "last_seen": local_text(row.last_seen),
-            "count": row.event_count,
-            "last_type": row.last_type,
+            "row_id": f"{row.device_id}:{row.uid}",
+            "status": "Đang kích hoạt" if row.enabled else "Vô hiệu hóa",
+            "created_at": local_text(row.created_at),
+            "synced_at": local_text(row.synced_at),
+            "last_seen": local_text(by_id[(row.device_id, row.uid)].last_seen)
+            if (row.device_id, row.uid) in by_id else "—",
+            "count": by_id[(row.device_id, row.uid)].event_count
+            if (row.device_id, row.uid) in by_id else 0,
         }
-        for row in rows
+        for row in cards
     ]
 
 

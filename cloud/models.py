@@ -87,3 +87,23 @@ class AdminSession(Base):
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user_agent: Mapped[str | None] = mapped_column(Text)
+
+
+class RFIDCard(Base):
+    """Read-only mirror of the Edge registry; never authorizes gate access."""
+    __tablename__ = "rfid_cards"
+
+    device_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    uid: Mapped[str] = mapped_column(String(80), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RFIDSnapshotState(Base):
+    __tablename__ = "rfid_snapshot_state"
+
+    device_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    snapshot_version: Mapped[int] = mapped_column(nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

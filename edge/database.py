@@ -17,6 +17,14 @@ def utcnow() -> str:
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS card_sync_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    snapshot_version INTEGER NOT NULL CHECK(snapshot_version >= 1),
+    synced_version INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    retry_at TEXT NOT NULL,
+    last_error TEXT
+);
 CREATE TABLE IF NOT EXISTS cards (
     uid TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
@@ -71,6 +79,11 @@ class Database:
         self.device_id = device_id
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            conn.execute(
+                'INSERT OR IGNORE INTO card_sync_state '
+                '(id,snapshot_version,synced_version,retry_at) VALUES (1,1,0,?)',
+                (utcnow(),),
+            )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -91,6 +104,12 @@ class Database:
                 db.execute('INSERT INTO cards(uid,enabled,created_at) VALUES (?,?,?) '
                            'ON CONFLICT(uid) DO UPDATE SET enabled=excluded.enabled',
                            (uid.upper(), int(enabled), utcnow()))
+                # Persist a new revision in the SAME transaction as the card change.
+                db.execute(
+                    'UPDATE card_sync_state SET snapshot_version=snapshot_version+1, '
+                    'attempts=0,retry_at=?,last_error=NULL WHERE id=1',
+                    (utcnow(),),
+                )
                 db.commit()
             except Exception:
                 db.rollback()
@@ -186,6 +205,63 @@ class Database:
                 db.rollback()
                 raise
         return {'type':event_type,'event_id':event['event_id'],'reason':event.get('reason')}
+
+    def card_snapshot_due(self) -> tuple[dict, int] | None:
+        """Return a consistent snapshot + retry count, or None if not due."""
+        with self.connect() as db:
+            db.execute('BEGIN')
+            try:
+                state = db.execute(
+                    'SELECT snapshot_version,synced_version,retry_at,attempts '
+                    'FROM card_sync_state WHERE id=1'
+                ).fetchone()
+                if (not state or state['synced_version'] >= state['snapshot_version']
+                        or state['retry_at'] > utcnow()):
+                    db.commit()
+                    return None
+                rows = db.execute(
+                    'SELECT uid,enabled,created_at FROM cards ORDER BY uid'
+                ).fetchall()
+                result = {
+                    'device_id': self.device_id,
+                    'snapshot_version': state['snapshot_version'],
+                    'cards': [
+                        {'uid': row['uid'], 'enabled': bool(row['enabled']),
+                         'created_at': row['created_at']}
+                        for row in rows
+                    ],
+                }
+                db.commit()
+                return result, state['attempts']
+            except Exception:
+                db.rollback()
+                raise
+
+    def mark_card_snapshot_synced(self, version: int) -> None:
+        with self.connect() as db:
+            db.execute(
+                'UPDATE card_sync_state SET synced_version=?,attempts=0,'
+                'last_error=NULL WHERE id=1 AND snapshot_version=? '
+                'AND synced_version<?',
+                (version, version, version),
+            )
+
+    def mark_card_snapshot_retry(self, version: int, attempts: int, error: str) -> None:
+        delay = min(300, 2 ** min(attempts, 8))
+        next_at = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat(
+            timespec='milliseconds'
+        )
+        with self.connect() as db:
+            db.execute(
+                'UPDATE card_sync_state SET attempts=?,retry_at=?,last_error=? '
+                'WHERE id=1 AND snapshot_version=?',
+                (attempts, next_at, str(error)[:400], version),
+            )
+
+    def card_sync_status(self) -> dict:
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM card_sync_state WHERE id=1').fetchone()
+            return dict(row)
 
     def pending(self, limit: int = 20) -> list[tuple[str,dict,int]]:
         with self.connect() as db:
