@@ -75,6 +75,7 @@ def main() -> int:
     p_run.add_argument('--camera',type=int,default=0)
     p_run.add_argument('--live',action='store_true',help='Push single-camera JPEG preview to Cloud')
     p_run.add_argument('--live-fps',type=float,default=1.0)
+    p_run.add_argument('--live-transport',choices=['http','ws'],default='http')
     p_run.add_argument('--live-width',type=int,default=640)
     p_run.add_argument('--detector',default='')
     p_run.add_argument('--recognizer',default='')
@@ -136,8 +137,9 @@ def main() -> int:
     if args.command=='run':
         if not args.real:
             parser.error('run requires --real: hardware access is never implicit')
-        if args.live and (not 0.2 <= args.live_fps <= 2.0 or not 160 <= args.live_width <= 960):
-            parser.error('Live settings: 0.2 <= --live-fps <= 2, 160 <= --live-width <= 960')
+        maximum_live_fps = 15.0 if args.live_transport == 'ws' else 2.0
+        if args.live and (not 0.2 <= args.live_fps <= maximum_live_fps or not 160 <= args.live_width <= 960):
+            parser.error(f'Live settings: 0.2 <= --live-fps <= {maximum_live_fps}, 160 <= --live-width <= 960')
         stop=threading.Event()
         def stop_signal(_sig,_frame):
             stop.set()
@@ -163,13 +165,14 @@ def main() -> int:
                 threads.append(thread)
             if args.live:
                 uploader=LiveFrameUplink(camera, sync.url, sync.token, db.device_id,
-                                         fps=args.live_fps,max_width=args.live_width)
+                                         fps=args.live_fps,max_width=args.live_width,
+                                         transport=args.live_transport)
                 thread=threading.Thread(target=uploader.run_forever,args=(stop,),
                                         daemon=True,name='camera-live-uplink')
                 thread.start()
                 threads.append(thread)
-                LOG.info('Live camera uplink enabled: %.1f FPS, width=%d',
-                         args.live_fps,args.live_width)
+                LOG.info('Live camera uplink enabled: %.1f FPS, width=%d, transport=%s',
+                         args.live_fps,args.live_width,args.live_transport)
             LOG.info('Waiting for RC522 taps. Ctrl+C to stop.')
             try:
                 while not stop.is_set():
