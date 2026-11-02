@@ -1,0 +1,6 @@
+# Required for the existing alpr_preprocess modules and OpenCV DNN ONNX inference.
+# Python 3.10+ recommended; use 64-bit Raspberry Pi OS.
+numpy>=1.24,<3
+opencv-python-headless>=4.10,<5
+# RC522 is optional and hardware/library specific. Install a compatible mfrc522
+# package on Raspberry Pi AFTER confirming its pinout and Python API.

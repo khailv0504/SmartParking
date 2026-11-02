@@ -1,0 +1,16 @@
+[Unit]
+Description=SmartParking RFID-triggered Edge AI
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/SmartParking
+EnvironmentFile=-/opt/SmartParking/edge/.env
+ExecStart=/opt/SmartParking/.venv/bin/python -m edge.main run --real
+Restart=on-failure
+RestartSec=5
+# User running the service must have video/spi access, configured separately.
+
+[Install]
+WantedBy=multi-user.target
