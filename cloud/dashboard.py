@@ -439,7 +439,8 @@ def register_dashboard(
     async def plates_page(request: Request):
         _shell("Ảnh biển số", request)
         ui.label(
-            "Phiên bản hiện tại chỉ đồng bộ metadata. Ảnh chưa được đồng bộ lên Cloud."
+            "Ảnh bằng chứng được chụp khi RFID kích hoạt AI. "
+            "Chỉ quản trị viên có phiên đăng nhập hợp lệ được xem ảnh."
         ).classes("bg-violet-50 text-violet-900 rounded-lg p-4 w-full")
         loading = _loading_label()
         error = _error_label()
@@ -456,6 +457,18 @@ def register_dashboard(
             {"name": "image", "label": "Ảnh", "field": "image"},
         ]
         table = _table(columns)
+        table.add_slot('body-cell-image', '''
+          <q-td :props="props">
+            <a v-if="props.row.has_image" :href="props.row.image_url"
+               target="_blank" rel="noopener noreferrer"
+               class="text-blue-700 underline">Toàn cảnh</a>
+            <a v-if="props.row.has_plate_image" :href="props.row.plate_image_url"
+               target="_blank" rel="noopener noreferrer"
+               class="text-blue-700 underline q-ml-sm">Crop biển số</a>
+            <span v-if="!props.row.has_image && !props.row.has_plate_image"
+                  class="text-slate-500">Chưa có ảnh</span>
+          </q-td>
+        ''')
         empty = _empty_label("Chưa có metadata biển số.")
 
         async def refresh():

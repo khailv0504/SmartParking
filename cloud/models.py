@@ -107,3 +107,15 @@ class RFIDSnapshotState(Base):
     snapshot_version: Mapped[int] = mapped_column(nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EvidenceImage(Base):
+    """Private evidence storage metadata; blob bytes live in R2 only."""
+    __tablename__ = "evidence_images"
+    event_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("edge_events.event_id"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    object_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

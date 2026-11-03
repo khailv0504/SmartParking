@@ -23,7 +23,7 @@ os.environ.update(
 
 from cloud.database import Base  # noqa: E402
 from cloud.main import app  # noqa: E402
-from cloud.models import AdminSession, EdgeEvent, ParkingSession, RFIDCard, RFIDSnapshotState  # noqa: E402
+from cloud.models import EvidenceImage, AdminSession, EdgeEvent, ParkingSession, RFIDCard, RFIDSnapshotState  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -37,6 +37,7 @@ def schema():
 @pytest.fixture(autouse=True)
 def clean_database(schema):
     with app.state.session_factory() as db, db.begin():
+        db.execute(delete(EvidenceImage))
         db.execute(delete(RFIDCard))
         db.execute(delete(RFIDSnapshotState))
         db.execute(delete(AdminSession))

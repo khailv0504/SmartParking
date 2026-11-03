@@ -58,6 +58,8 @@ class LiveFrameUplink:
         self._lock = threading.Lock()
         self._last_event: str = ""
         self._event_at: float = 0.0
+        self._evidence_preview = None
+        self._evidence_at: float = 0.0
 
     def note_event(self, outcome: object) -> None:
         action = str(getattr(outcome, "action", ""))[:16]
@@ -66,12 +68,35 @@ class LiveFrameUplink:
             self._last_event = f"LAST RFID: {action} / PLATE: {plate}"
             self._event_at = time.monotonic()
 
+    def show_evidence(self, annotated_plate) -> None:
+        """PiP snapshot of RFID inference; does not claim per-frame tracking."""
+        with self._lock:
+            self._evidence_preview = annotated_plate.copy()
+            self._evidence_at = time.monotonic()
+
     def _encode(self, frame) -> bytes:
         h, w = frame.shape[:2]
         if w > self.width:
             frame = cv2.resize(frame, (self.width, max(1, round(h * self.width / w))), interpolation=cv2.INTER_AREA)
         with self._lock:
             recent = self._last_event if time.monotonic() - self._event_at < 12 else ""
+            evidence = (self._evidence_preview
+                        if time.monotonic() - self._evidence_at < 6 else None)
+        if evidence is not None and frame.shape[1] >= 280 and frame.shape[0] >= 200:
+            # True OCR boxes on a captured still inset; live video underneath stays
+            # smooth and is never labeled as 10 FPS model inference.
+            maxw, maxh = min(290, frame.shape[1] // 2), min(155, frame.shape[0] // 2)
+            eh, ew = evidence.shape[:2]
+            if ew > 0 and eh > 0:
+                scale = min(maxw / ew, maxh / eh)
+                tile = cv2.resize(evidence, (max(1, round(ew*scale)), max(1, round(eh*scale))),
+                                  interpolation=cv2.INTER_AREA)
+                th, tw = tile.shape[:2]
+                x, y = frame.shape[1]-tw-9, 36
+                frame[y:y+th, x:x+tw] = tile
+                cv2.rectangle(frame, (x-2,y-2), (x+tw+2,y+th+2), (0,235,0), 2)
+                cv2.putText(frame, 'RFID SNAPSHOT', (x, max(10, y-7)),
+                            cv2.FONT_HERSHEY_SIMPLEX, .44, (0,235,0), 1, cv2.LINE_AA)
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 28), (20, 25, 32), -1)
         cv2.putText(frame, "SMARTPARKING | LIVE CAMERA", (8, 19),
                     cv2.FONT_HERSHEY_SIMPLEX, .48, (255, 255, 255), 1, cv2.LINE_AA)

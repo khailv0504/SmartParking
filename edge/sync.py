@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
 from .database import Database
+from .evidence import upload_pending
 
 LOG = logging.getLogger(__name__)
 
@@ -80,11 +81,15 @@ class SyncWorker:
             LOG.warning('Card sync failed (version=%s): %s', version, exc)
             return 0, 1
 
+    def run_evidence_once(self) -> tuple[int,int]:
+        return upload_pending(self.db, self.url, self.token)
+
     def run_forever(self, stop, interval_s: float = 5):
         while not stop.is_set():
             try:
                 self.run_once()
                 self.run_cards_once()
+                self.run_evidence_once()
             except Exception:
                 LOG.exception('Sync worker unexpected error')
             stop.wait(interval_s)

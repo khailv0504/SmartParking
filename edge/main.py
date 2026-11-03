@@ -23,6 +23,7 @@ from .database import Database
 from .frame_capture import FrameSelector, MockFrameSelector
 from .alpr_preprocess.sources import CameraSource
 from .live_uplink import LiveFrameUplink
+from .evidence import EvidenceRecorder
 from .recognition import MockRecognizer, YOLOPlateRecognizer
 from .rfid import RC522Reader
 from .sync import SyncWorker
@@ -101,6 +102,7 @@ def main() -> int:
             raise RuntimeError('Cloud URL/token not configured')
         print('events synced,failed:',worker.run_once())
         print('card snapshots synced,failed:',worker.run_cards_once())
+        print('evidence synced,failed:',worker.run_evidence_once())
         print('card sync state:',json.dumps(db.card_sync_status(),ensure_ascii=False))
         return 0
     if args.command=='demo':
@@ -173,6 +175,9 @@ def main() -> int:
                 threads.append(thread)
                 LOG.info('Live camera uplink enabled: %.1f FPS, width=%d, transport=%s',
                          args.live_fps,args.live_width,args.live_transport)
+            controller.evidence_recorder = EvidenceRecorder(
+                db, ROOT/'data'/'evidence',
+                on_preview=(uploader.show_evidence if uploader else None))
             LOG.info('Waiting for RC522 taps. Ctrl+C to stop.')
             try:
                 while not stop.is_set():
