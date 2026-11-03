@@ -1,0 +1,17 @@
+{
+  "description": "YOLO26n pair for SmartParking edge",
+  "detector_sha256": "e54e22d9a95e914bbb07953e7f5cc60303eea3cc2b8364de6d69b2a6865b370b",
+  "recognizer_sha256": "2dd4645acbdb166f3777670392aa4b4ed1963e41b8b64381806bcff0d6e678fe",
+  "detector_shape": [
+    1,
+    6,
+    8400
+  ],
+  "recognizer_shape": [
+    1,
+    34,
+    2100
+  ],
+  "recognizer_classes": "0123456789ABCDEFGHKLMNPSTUVXYZ",
+  "backup_dir": "/home/khai/SmartParking-github/edge/models/backups/20261104_003025_1410"
+}
