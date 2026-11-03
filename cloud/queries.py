@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import EdgeEvent, ParkingSession, RFIDCard
+from .models import EvidenceImage, EdgeEvent, ParkingSession, RFIDCard
 
 VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -230,6 +230,14 @@ def plate_metadata(factory: sessionmaker[Session], limit: int = 100) -> list[dic
             .order_by(EdgeEvent.event_timestamp.desc())
             .limit(limit)
         ).all()
+    with factory() as db:
+        ids = [row.event_id for row in rows]
+        available = set(db.execute(
+            select(EvidenceImage.event_id, EvidenceImage.kind)
+            .where(EvidenceImage.event_id.in_(ids))
+        ).all()) if ids else set()
+        present = {eid for eid, kind in available if kind == 'annotated'}
+        present_plate = {eid for eid, kind in available if kind == 'plate'}
     return [
         {
             "plate": row.plate,
@@ -237,7 +245,11 @@ def plate_metadata(factory: sessionmaker[Session], limit: int = 100) -> list[dic
             "uid": row.uid or "—",
             "ocr": format_confidence(row.ocr_confidence),
             "detection": format_confidence(row.detection_confidence),
-            "image": "Ảnh chưa được đồng bộ lên Cloud",
+            "has_image": row.event_id in present,
+            "image_url": f"/api/evidence/{row.event_id}/annotated.jpg" if row.event_id in present else "",
+            "has_plate_image": row.event_id in present_plate,
+            "plate_image_url": f"/api/evidence/{row.event_id}/plate.jpg" if row.event_id in present_plate else "",
+            "image": "Xem ảnh" if row.event_id in present else "Chưa có ảnh",
         }
         for row in rows
     ]

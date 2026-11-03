@@ -31,6 +31,11 @@ class Settings(BaseSettings):
         default=10, alias="RECENT_DEVICE_MINUTES", ge=1, le=1440
     )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    # Optional private S3-compatible / Cloudflare R2 object storage.
+    r2_endpoint: str = Field(default="", alias="R2_ENDPOINT")
+    r2_bucket: str = Field(default="", alias="R2_BUCKET")
+    r2_access_key_id: str = Field(default="", alias="R2_ACCESS_KEY_ID")
+    r2_secret_access_key: str = Field(default="", alias="R2_SECRET_ACCESS_KEY")
 
     @field_validator("database_url")
     @classmethod

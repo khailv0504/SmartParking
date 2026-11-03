@@ -202,17 +202,21 @@ class YOLOPlateRecognizer:
             return Recognition(None, 0, p.confidence, report.quality_score, (), (),
                                (time.perf_counter()-start)*1000, "POOR_ROI_QUALITY", plate_box=p)
         raw_chars = self.characters.predict(crop)
+        # Character YOLO predicts in the padded plate ROI; map coordinates
+        # into the original camera frame for evidence annotation.
+        global_chars = tuple(Box(c.x1+x1, c.y1+y1, c.x2+x1, c.y2+y1,
+                                 c.confidence, c.class_id) for c in raw_chars)
         rows = group_text_rows(raw_chars)
         plate = "".join(rows)
         if not rows or not (7 <= len(plate) <= 10) or not PLATE_CHARS.fullmatch(plate):
             return Recognition(None, 0, p.confidence, report.quality_score, rows,
-                               tuple(raw_chars), (time.perf_counter()-start)*1000,
+                               global_chars, (time.perf_counter()-start)*1000,
                                "INVALID_OCR_LAYOUT", plate_box=p)
         # The lowest character confidence catches a weak link but isn't a
         # calibrated probability of exact-string correctness.
         confidence = min(c.confidence for c in raw_chars)
         return Recognition(plate, confidence, p.confidence, report.quality_score,
-                           rows, tuple(raw_chars), (time.perf_counter()-start)*1000, plate_box=p)
+                           rows, global_chars, (time.perf_counter()-start)*1000, plate_box=p)
 
 
 class MockRecognizer:

@@ -11,6 +11,7 @@ from .auth import build_auth_router, resolve_admin_session
 from .config import Settings, get_settings
 from .dashboard import register_dashboard
 from .live import LiveFrameStore, build_live_router
+from .evidence import build_evidence_router
 from .database import make_engine, make_session_factory
 
 PROTECTED_PAGES = {"/", "/history", "/inside", "/rfid", "/device", "/plates", "/live"}
@@ -72,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(build_card_router(settings, factory))
     app.include_router(build_auth_router(settings, factory))
     app.include_router(build_live_router(settings, factory, app.state.live_frames))
+    app.include_router(build_evidence_router(settings, factory))
     register_dashboard(app, settings, factory)
     return app
 

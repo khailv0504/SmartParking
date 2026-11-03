@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS sync_outbox (
     synced_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON sync_outbox(status,retry_at);
+CREATE TABLE IF NOT EXISTS evidence_outbox (
+    event_id TEXT NOT NULL REFERENCES events(event_id),
+    kind TEXT NOT NULL CHECK(kind IN ('annotated','plate')),
+    filename TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','SYNCED')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    retry_at TEXT NOT NULL,
+    last_error TEXT,
+    synced_at TEXT,
+    PRIMARY KEY(event_id,kind)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_due ON evidence_outbox(status,retry_at);
 """
 
 
@@ -281,6 +293,37 @@ class Database:
         with self.connect() as db:
             db.execute('UPDATE sync_outbox SET attempts=?,last_error=?,retry_at=? WHERE event_id=?',
                        (attempts, str(error)[:400],next_at,event_id))
+
+    def enqueue_evidence(self, event_id: str, kind: str, filename: str) -> None:
+        if kind not in ('annotated', 'plate'):
+            raise ValueError('Unsupported evidence kind')
+        with self.connect() as db:
+            db.execute('INSERT OR IGNORE INTO evidence_outbox '
+                       '(event_id,kind,filename,retry_at) VALUES (?,?,?,?)',
+                       (event_id, kind, filename, utcnow()))
+
+    def pending_evidence(self, limit: int = 3) -> list[tuple[str,str,str,int]]:
+        # Do not upload an image before its owning event reached Cloud.
+        with self.connect() as db:
+            rows = db.execute('SELECT e.event_id,e.kind,e.filename,e.attempts '
+                              'FROM evidence_outbox e JOIN sync_outbox s ON s.event_id=e.event_id '
+                              'WHERE e.status=? AND e.retry_at<=? AND s.status=? '
+                              'ORDER BY e.retry_at LIMIT ?',
+                              ('PENDING',utcnow(),'SYNCED',limit)).fetchall()
+            return [(r['event_id'],r['kind'],r['filename'],r['attempts']) for r in rows]
+
+    def mark_evidence_synced(self, event_id: str, kind: str) -> None:
+        with self.connect() as db:
+            db.execute('UPDATE evidence_outbox SET status=?, synced_at=?, last_error=NULL '
+                       'WHERE event_id=? AND kind=?', ('SYNCED',utcnow(),event_id,kind))
+
+    def mark_evidence_retry(self, event_id: str, kind: str, attempts: int, error: str) -> None:
+        delay = min(300, 2 ** min(attempts, 8))
+        retry = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat(timespec='milliseconds')
+        with self.connect() as db:
+            db.execute('UPDATE evidence_outbox SET attempts=?, retry_at=?, last_error=? '
+                       'WHERE event_id=? AND kind=?',
+                       (attempts,retry,error[:400],event_id,kind))
 
     def summary(self) -> dict:
         with self.connect() as db:

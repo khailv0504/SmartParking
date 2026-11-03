@@ -41,8 +41,9 @@ class Outcome:
 
 class ParkingController:
     def __init__(self, db: Database, selector, recognizer: Recognizer,
-                 cooldown_seconds: float = 3.0, min_ocr_conf: float = 0.60):
+                 cooldown_seconds: float = 3.0, min_ocr_conf: float = 0.60, evidence_recorder=None):
         self.db = db
+        self.evidence_recorder = evidence_recorder
         self.selector = selector
         self.recognizer = recognizer
         self.cooldown = cooldown_seconds
@@ -92,30 +93,37 @@ class ParkingController:
             self.state = State.RECOGNIZING
             # Sequential attempts limit RAM. Do not always choose the highest
             # IQA frame as the best OCR result: run OCR over up to K candidates.
-            recognized: list[tuple[Recognition,float]] = []
+            recognized: list[tuple[Recognition,float,object]] = []
             for frame, iqa_score in candidates:
                 prediction = self.recognizer.recognize(frame)
-                recognized.append((prediction,iqa_score))
-            valid = [(r,q) for r,q in recognized if r.plate and r.confidence >= self.min_ocr_conf]
+                recognized.append((prediction,iqa_score,frame))
+            valid = [(r,q,f) for r,q,f in recognized if r.plate and r.confidence >= self.min_ocr_conf]
             self.state = State.VALIDATING
             if not valid:
-                best,iq = max(recognized,key=lambda item:item[0].confidence)
+                best,iq,selected_frame = max(recognized,key=lambda item:item[0].confidence)
                 event.update(ocr_confidence=best.confidence,
                              detection_confidence=best.detector_confidence,
-                             iqa_score=iq, inference_ms=sum(r.latency_ms for r,_ in recognized),
+                             iqa_score=iq, inference_ms=sum(r.latency_ms for r,_,_ in recognized),
                              reason=best.reason or 'LOW_OCR_CONFIDENCE')
             else:
                 # A disagreement between distinct valid frames is not a reliable event.
-                plate_sets = {r.plate for r,_ in valid}
-                best,iq = max(valid,key=lambda item:item[0].confidence)
+                plate_sets = {r.plate for r,_,_ in valid}
+                best,iq,selected_frame = max(valid,key=lambda item:item[0].confidence)
                 event.update(plate=best.plate,
                              ocr_confidence=best.confidence,
                              detection_confidence=best.detector_confidence,
-                             iqa_score=iq,inference_ms=sum(r.latency_ms for r,_ in recognized))
+                             iqa_score=iq,inference_ms=sum(r.latency_ms for r,_,_ in recognized))
                 if len(plate_sets) > 1:
                     event['reason'] = 'OCR_DISAGREEMENT'
             self.state = State.COMMITTING
             result = self.db.commit_event(event,self.min_ocr_conf)
+            # Evidence is best-effort AFTER the parking transaction: disk/Cloud
+            # failures may not change ENTRY, EXIT, REVIEW decisions.
+            if self.evidence_recorder is not None:
+                try:
+                    self.evidence_recorder.save(event_id, selected_frame, best)
+                except Exception:
+                    LOG.exception('Evidence capture failed for event_id=%s', event_id)
             self.state = State.DONE
             return self._finish(result,uid,event,begin)
         except Exception as exc:
