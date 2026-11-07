@@ -6,6 +6,7 @@ No second VideoCapture, no YOLO, no local recording or unbounded queue.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -60,6 +61,29 @@ class LiveFrameUplink:
         self._event_at: float = 0.0
         self._evidence_preview = None
         self._evidence_at: float = 0.0
+        # Ephemeral UI state only. No SQLite event or additional camera capture.
+        self._rfid_status: dict | None = None
+        self._rfid_version = 0
+        self._rfid_at = 0.0
+
+    def note_processing(self, uid: str) -> None:
+        # Invoked immediately after RC522 returns a UID, before inference starts.
+        with self._lock:
+            self._rfid_status = {
+                "kind": "rfid_progress", "phase": "PROCESSING",
+                "uid": uid[:24], "action": "", "plate": "",
+            }
+            self._rfid_at = time.monotonic()
+            self._rfid_version += 1
+
+    def note_failed(self) -> None:
+        with self._lock:
+            self._rfid_status = {
+                "kind": "rfid_progress", "phase": "ERROR",
+                "uid": "", "action": "", "plate": "",
+            }
+            self._rfid_at = time.monotonic()
+            self._rfid_version += 1
 
     def note_event(self, outcome: object) -> None:
         action = str(getattr(outcome, "action", ""))[:16]
@@ -67,6 +91,13 @@ class LiveFrameUplink:
         with self._lock:
             self._last_event = f"LAST RFID: {action} / PLATE: {plate}"
             self._event_at = time.monotonic()
+            self._rfid_status = {
+                "kind": "rfid_progress", "phase": "DONE",
+                "uid": str(getattr(outcome, "uid", ""))[:24],
+                "action": action, "plate": plate,
+            }
+            self._rfid_at = self._event_at
+            self._rfid_version += 1
 
     def show_evidence(self, annotated_plate) -> None:
         """PiP snapshot of RFID inference; does not claim per-frame tracking."""
@@ -79,7 +110,11 @@ class LiveFrameUplink:
         if w > self.width:
             frame = cv2.resize(frame, (self.width, max(1, round(h * self.width / w))), interpolation=cv2.INTER_AREA)
         with self._lock:
-            recent = self._last_event if time.monotonic() - self._event_at < 12 else ""
+            processing = (self._rfid_status is not None
+                          and self._rfid_status.get("phase") == "PROCESSING"
+                          and time.monotonic() - self._rfid_at < 20)
+            recent = ("RFID RECEIVED | RECOGNIZING PLATE..." if processing else
+                      self._last_event if time.monotonic() - self._event_at < 12 else "")
             evidence = (self._evidence_preview
                         if time.monotonic() - self._evidence_at < 6 else None)
         if evidence is not None and frame.shape[1] >= 280 and frame.shape[0] >= 200:
@@ -173,11 +208,22 @@ class LiveFrameUplink:
                 )
                 failures = 0
                 last_id = None
+                last_status_version = -1  # Re-send latest status after reconnect.
                 sent = 0
                 window_start = time.monotonic()
                 LOG.info("Live WebSocket connected")
                 while not stop.is_set():
                     start = time.monotonic()
+                    with self._lock:
+                        version = self._rfid_version
+                        status = (dict(self._rfid_status)
+                                  if self._rfid_status is not None
+                                  and time.monotonic() - self._rfid_at < 20 else None)
+                    if status is not None and version != last_status_version:
+                        # Text messages share the existing authenticated WS;
+                        # binary JPEG frames remain backward compatible.
+                        ws.send(json.dumps(status, ensure_ascii=True))
+                        last_status_version = version
                     last_id, jpeg = self._next_jpeg(last_id)
                     if jpeg is not None:
                         ws.send_binary(jpeg)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import json
 import re
 import secrets
 import threading
@@ -54,6 +55,29 @@ class LiveFrameStore:
         self._received_monotonic = 0.0
         self._sequence = 0
         self._times: deque[float] = deque(maxlen=300)
+        self._rfid_progress: dict | None = None
+        self._rfid_progress_at = 0.0
+
+    def publish_progress(self, progress: dict, device_id: str) -> None:
+        """Transient display state; never a persisted parking event."""
+        with self._lock:
+            self._rfid_progress = {
+                "phase": progress["phase"], "device_id": device_id,
+                "uid": progress["uid"], "action": progress["action"],
+                "plate": progress["plate"],
+            }
+            self._rfid_progress_at = time.monotonic()
+            self._lock.notify_all()
+
+    def progress_status(self) -> dict | None:
+        with self._lock:
+            if self._rfid_progress is None:
+                return None
+            elapsed = time.monotonic() - self._rfid_progress_at
+            lifetime = 20 if self._rfid_progress["phase"] == "PROCESSING" else 12
+            if elapsed > lifetime:
+                return None
+            return dict(self._rfid_progress)
 
     def publish(self, jpeg: bytes, device_id: str) -> None:
         now = time.monotonic()
@@ -140,6 +164,25 @@ def build_live_router(
                 msg = await websocket.receive()
                 if msg["type"] == "websocket.disconnect":
                     break
+                incoming_text = msg.get("text")
+                if incoming_text is not None:
+                    if len(incoming_text) > 1024:
+                        await websocket.close(code=1009)
+                        break
+                    try:
+                        progress = json.loads(incoming_text)
+                        if (not isinstance(progress, dict)
+                            or progress.get("kind") != "rfid_progress"
+                            or progress.get("phase") not in {"PROCESSING", "DONE", "ERROR"}
+                            or any(not isinstance(progress.get(field), str)
+                                   or len(progress[field]) > 64
+                                   for field in ("uid", "action", "plate"))):
+                            raise ValueError("Invalid RFID progress")
+                    except (ValueError, TypeError):
+                        await websocket.close(code=1003)
+                        break
+                    store.publish_progress(progress, device_id)
+                    continue
                 jpeg = msg.get("bytes")
                 if jpeg is None:
                     await websocket.close(code=1003)
@@ -170,7 +213,9 @@ def build_live_router(
     @router.get("/api/live/status")
     def live_status(request: Request) -> dict:
         require_admin(request)
-        return store.status()
+        info = store.status()
+        info["rfid_progress"] = store.progress_status()
+        return info
 
     @router.get("/api/live/stream.mjpg")
     async def live_mjpeg(request: Request) -> StreamingResponse:
