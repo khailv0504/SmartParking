@@ -191,7 +191,14 @@ def main() -> int:
                 while not stop.is_set():
                     uid=reader.read_uid()
                     if uid:
-                        result=controller.process(uid)
+                        if uploader:
+                            uploader.note_processing(uid)
+                        try:
+                            result=controller.process(uid)
+                        except Exception:
+                            if uploader:
+                                uploader.note_failed()
+                            raise
                         if uploader:
                             uploader.note_event(result)
                         LOG.info('event: %s',json.dumps(vars(result)))
