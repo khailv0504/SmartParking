@@ -1,0 +1,4 @@
+# Add-on for the existing edge environment. Do not replace requirements.txt.
+# ncnn wheel must match Raspberry Pi's Python ABI and aarch64 platform.
+ncnn==1.0.20261020
+PyYAML>=6.0,<7
