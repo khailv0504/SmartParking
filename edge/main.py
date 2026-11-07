@@ -37,6 +37,12 @@ def config_database(args) -> Database:
 
 
 def make_real_recognizer(args):
+    if getattr(args, 'backend', 'opencv') == 'ncnn':
+        from .ncnn_inference import NCNNPlateRecognizer
+        return NCNNPlateRecognizer(
+            args.detector or ROOT/'models'/'ncnn_yolo26n_fp16'/'detector',
+            args.recognizer or ROOT/'models'/'ncnn_yolo26n_fp16'/'ocr',
+            strict_roi_quality=args.strict_roi_quality)
     return YOLOPlateRecognizer(args.detector or ROOT/'models'/'detector.onnx',
                                args.recognizer or ROOT/'models'/'recognizer.onnx',
                                strict_roi_quality=args.strict_roi_quality)
@@ -68,6 +74,7 @@ def main() -> int:
     p_img.add_argument('--image',required=True)
     p_img.add_argument('--output',default='',help='Optional image with plate bounding box')
     for p in (p_img,):
+        p.add_argument('--backend', choices=['opencv','ncnn'], default='opencv')
         p.add_argument('--detector',default='')
         p.add_argument('--recognizer',default='')
         p.add_argument('--strict-roi-quality',action='store_true')
@@ -78,6 +85,7 @@ def main() -> int:
     p_run.add_argument('--live-fps',type=float,default=1.0)
     p_run.add_argument('--live-transport',choices=['http','ws'],default='http')
     p_run.add_argument('--live-width',type=int,default=640)
+    p_run.add_argument('--backend', choices=['opencv','ncnn'], default='opencv')
     p_run.add_argument('--detector',default='')
     p_run.add_argument('--recognizer',default='')
     p_run.add_argument('--strict-roi-quality',action='store_true')
