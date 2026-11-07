@@ -152,6 +152,17 @@ def register_dashboard(
                 """
             ).classes("w-full")
 
+    def rfid_progress_label(progress: dict | None) -> str:
+        if progress is None:
+            return "RFID: Đang chờ quẹt thẻ"
+        phase = progress.get("phase")
+        if phase == "PROCESSING":
+            return "Đã nhận RFID — đang chụp và nhận dạng biển số..."
+        if phase == "ERROR":
+            return "Có lỗi khi xử lý RFID — vui lòng liên hệ quản trị viên"
+        return (f"RFID: {progress.get('action') or 'Đã xử lý'} | "
+                f"Biển số: {progress.get('plate') or '—'}")
+
     @ui.page("/")
     async def dashboard_page(request: Request):
         _shell("Tổng quan", request)
@@ -170,6 +181,12 @@ def register_dashboard(
                         ui.label(label).classes("text-slate-500")
                         ui.icon(icon).classes("text-blue-700")
                     cards[key] = ui.label("—").classes("text-3xl font-bold")
+        rfid_now = ui.label("RFID: Đang chờ quẹt thẻ").classes(
+            "text-base font-semibold text-blue-700"
+        )
+        ui.timer(0.5, lambda: rfid_now.set_text(
+            rfid_progress_label(fastapi_app.state.live_frames.progress_status())
+        ))
         last = ui.label("Dữ liệu gần nhất: —").classes("text-sm text-slate-500")
         ui.label("Sự kiện gần nhất").classes("text-lg font-semibold mt-4")
         table = _table(EVENT_COLUMNS)
@@ -410,6 +427,12 @@ def register_dashboard(
             "YOLO/OCR chỉ xử lý khi RFID kích hoạt."
         ).classes("text-slate-600")
         status_label = ui.label("Đang kiểm tra camera...").classes("text-blue-700")
+        rfid_now = ui.label("RFID: Đang chờ quẹt thẻ").classes(
+            "text-base font-semibold text-blue-700"
+        )
+        ui.timer(0.5, lambda: rfid_now.set_text(
+            rfid_progress_label(fastapi_app.state.live_frames.progress_status())
+        ))
         ui.html(
             '<img src="/api/live/stream.mjpg" alt="SmartParking live camera" '
             'style="display:block;width:100%;height:auto;max-width:896px;'
